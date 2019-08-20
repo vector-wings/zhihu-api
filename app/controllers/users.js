@@ -5,12 +5,23 @@ const { secret } = require('../config')
 
 // 真实数据库
 const User = require('../models/users')
+const Question = require('../models/questions')
+const Answer = require('../models/answers')
 
 class UsersCtl {
     // 自定义授权中间件
     async checkOwner(ctx, next) {
         if (ctx.params.id !== ctx.state.user._id) {
             ctx.throw(403, '没有权限 ')
+        }
+        await next()
+    }
+
+    // 自定义检查用户是否存在中间件
+    async checkUserExist(ctx, next) {
+        const user = await User.findById(ctx.params.id)
+        if (!user) {
+            ctx.throw(404, '大哈已存在')
         }
         await next()
     }
@@ -23,8 +34,16 @@ class UsersCtl {
         // 使用数据库操作
         // 特别注意：我们操作数据库的时候，是异步方法
         // 而路由是同步方法，所以当访问数据库的时候，我们需要将路由也改为异步方法
-        const users = await User.find()
-        ctx.body = users
+        const { pre_page = 10 } = ctx.query
+        const page = Math.max(ctx.query.page * 1, 1) - 1
+        // 转换 String 为 Number
+        const prePage = Math.max(pre_page * 1, 1)
+        // limit()：表示限制每一次从数据库中取出数据的条数
+        // skip()：表示跳过多少条数
+        ctx.body = await User
+        .find({name: new RegExp(ctx.query.q)})
+        .limit(prePage)
+        .skip(page * prePage)
     }
 
     async findById(ctx) {
@@ -36,7 +55,21 @@ class UsersCtl {
         // ctx.body = db[ctx.params.id * 1]
 
         // 使用数据库操作
-        const user = await User.findById(ctx.params.id)
+        // 取出请求地址上的参数
+        const { fields = '' } = ctx.query; 
+        const selectFields = fields.split(';').filter(f => f).map(f => ' +' + f).join('')
+        // .select('+educations+business') 表示在从数据库中获取到的结果中加上请求中的字段
+        const populateStr = fields.split(';').filter(f => f).map(f => {
+            if (f === 'employments') {
+                return 'employments.company employments.job'
+            }
+            if (f === 'educations') {
+                return 'educations.school educations.major'
+            }
+            return f
+        }).join(' ')
+        const user = await User.findById(ctx.params.id).select(selectFields)
+        .populate(populateStr)
         if (!user) {
             ctx.throw(404, '用户不存在')
         }
@@ -75,8 +108,15 @@ class UsersCtl {
 
         // 校验请求参数
         ctx.verifyParams({
-            name: {type: 'string', required: false},
-            password: {type: 'string', required: false}
+            name: { type: 'string', required: false },
+            password: { type: 'string', required: false },
+            avatar_url: { type: 'string', required: false },
+            gender: { type: 'string', required: false },
+            headline: { type: 'string', required: false },
+            locations: { type: 'array', itemType: 'string', required: false },
+            business: { type: 'string', required: false },
+            employments: { type: 'array', itemType: 'object', required: false },
+            educations: { type: 'array', itemType: 'object', required: false }
         })
 
         // db[ctx.params.id * 1] = ctx.request.body
@@ -123,6 +163,141 @@ class UsersCtl {
         const { _id, name } = user
         const token = jsonwebtoken.sign({ _id, name }, secret, { expiresIn: '1d' })
         ctx.body = { token }
+    }
+
+    // 获取某人自己所关注的人的列表
+    async listFollowing(ctx) {
+        const user = await User.findById(ctx.params.id).select('+following').populate('following')
+        if (!user) {
+            ctx.throw(404, '用户不存在')
+        }
+        ctx.body = user.following
+    }
+
+    // 获取粉丝列表
+    async listFollowers(ctx) {
+        const users = await User.find({following: ctx.params.id})
+        ctx.body = users
+    }
+
+    // 关注某个用户
+    async follow(ctx) {
+        const me = await User.findById(ctx.state.user._id).select('+following')
+        if (!me.following.map(id => id.toString()).includes(ctx.params.id)) {
+            me.following.push(ctx.params.id)
+            me.save()
+        }
+        ctx.status = 204
+    }
+
+    // 取消关注某个话题
+    async unfollowTopic(ctx) {
+        const me = await User.findById(ctx.state.user._id).select('+followingTopics')
+        const index = me.followingTopics.map(id => id.toString()).indexOf(ctx.params.id)
+        if (index > -1) {
+            me.followingTopics.splice(index, 1)
+            me.save()
+        }
+        ctx.status = 204
+    }
+
+    // 获取用户关注话题列表
+    async listFollowingTopics(ctx) {
+        const user = await User.findById(ctx.params.id).select('+followingTopics').populate('followingTopics')
+        if (!user) {
+            ctx.throw(404, '用户不存在')
+        }
+        ctx.body = user.followingTopics
+    } 
+
+    // 关注某个话题
+    async followTopic(ctx) {
+        const me = await User.findById(ctx.state.user._id).select('+followingTopics')
+        if (!me.followingTopics.map(id => id.toString()).includes(ctx.params.id)) {
+            me.followingTopics.push(ctx.params.id)
+            me.save()
+        }
+        ctx.status = 204
+    }
+
+    // 取消关注某个用户
+    async unfollow(ctx) {
+        const me = await User.findById(ctx.state.user._id).select('+followingTopics')
+        const index = me.followingTopics.map(id => id.toString()).indexOf(ctx.params.id)
+        if (index > -1) {
+            me.followingTopics.splice(index, 1)
+            me.save()
+        }
+        ctx.status = 204
+    }
+
+    async listQuestions(ctx) {
+        const questions = await Question.find({ questioner: ctx.params.id })
+        ctx.body = questions
+    }
+
+    // 获取用户喜欢的回答
+    async listLikingAnswers(ctx) {
+        const user = await User.findById(ctx.params.id).select('+likingAnswers').populate('likingAnswers')
+        if (!user) {
+            ctx.throw(404, '用户不存在')
+        }
+        ctx.body = user.likingAnswers
+    } 
+
+    // 喜欢某个回答
+    async likeAnswer(ctx, next) {
+        const me = await User.findById(ctx.state.user._id).select('+likingAnswers')
+        if (!me.likingAnswers.map(id => id.toString()).includes(ctx.params.id)) {
+            me.likingAnswers.push(ctx.params.id)
+            me.save()
+            await Answer.findByIdAndUpdate(ctx.params.id, { $inc: { votecount: 1 }})
+        }
+        ctx.status = 204
+        await next()
+    }
+
+    // 取消喜欢某个回答
+    async unlikeAnswers(ctx) {
+        const me = await User.findById(ctx.state.user._id).select('+likingAnswers')
+        const index = me.likingAnswers.map(id => id.toString()).indexOf(ctx.params.id)
+        if (index > -1) {
+            me.likingAnswers.splice(index, 1)
+            me.save()
+            await Answer.findByIdAndUpdate(ctx.params.id, { $inc: { votecount: -1 }})
+        }
+        ctx.status = 204
+    }
+
+    // 获取用户喜欢的回答
+    async listDislikingAnswers(ctx) {
+        const user = await User.findById(ctx.params.id).select('+dislikingAnswers').populate('dislikingAnswers')
+        if (!user) {
+            ctx.throw(404, '用户不存在')
+        }
+        ctx.body = user.dislikingAnswers
+    } 
+
+    // 喜欢某个回答
+    async dislikeAnswer(ctx, next) {
+        const me = await User.findById(ctx.state.user._id).select('+dislikingAnswers')
+        if (!me.dislikingAnswers.map(id => id.toString()).includes(ctx.params.id)) {
+            me.dislikingAnswers.push(ctx.params.id)
+            me.save()
+        }
+        ctx.status = 204
+        await next()
+    }
+
+    // 取消喜欢某个回答
+    async undislikeAnswers(ctx) {
+        const me = await User.findById(ctx.state.user._id).select('+dislikingAnswers')
+        const index = me.dislikingAnswers.map(id => id.toString()).indexOf(ctx.params.id)
+        if (index > -1) {
+            me.dislikingAnswers.splice(index, 1)
+            me.save()
+        }
+        ctx.status = 204
     }
 }
 

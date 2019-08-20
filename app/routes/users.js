@@ -9,9 +9,22 @@ const {
     update, 
     delete: del, 
     login,
-    checkOwner
+    checkOwner,
+    listFollowing,
+    follow,
+    unfollow,
+    listFollowers,
+    checkUserExist,
+    listFollowingTopics,
+    followTopic,
+    unfollowTopic,
+    listQuestions,
+    listLikingAnswers, likeAnswer, unlikeAnswers,
+    listDislikingAnswers, dislikeAnswer, undislikeAnswers
 } = require('../controllers/users')
 
+const { checkTopicExist } = require('../controllers/topics')
+const { checkAnswerExist } = require('../controllers/answers')
 const { secret } = require('../config')
 
 // 添加自定义验证中间件(jwt)
@@ -81,5 +94,68 @@ router.post('/login', async (ctx) => {
     await login(ctx)
 })
 
+// 获取某人自己所关注的人的列表
+router.get('/:id/following', async (ctx) => {
+    await listFollowing(ctx)
+})
+
+// 关注某个用户
+router.put('/following/:id', auth, checkUserExist, async (ctx) => {
+    await follow(ctx)
+})
+
+// 取消关注某个用户
+router.delete('/following/:id', auth, checkUserExist, async (ctx) => {
+    await unfollow(ctx)
+})
+
+// 获取某个用户自己的粉丝列表
+router.get('/:id/followers', async (ctx) => {
+    await listFollowers(ctx)
+})
+
+// 获取某人关注的话题列表
+router.get('/:id/followingTopics', async (ctx) => {
+    await listFollowingTopics(ctx)
+})
+
+// 关注某个话题
+router.put('/followingTopics/:id', auth, checkTopicExist, async (ctx) => {
+    await followTopic(ctx)
+})
+
+// 取消关注某个话题
+router.delete('/followingTopics/:id', auth, checkTopicExist, async (ctx) => {
+    await unfollowTopic(ctx)
+})
+
+// 获取某个用户自己的问题列表
+router.get('/:id/followers', async (ctx) => {
+    await listQuestions(ctx)
+})
+
+router.get('/:id/likingAnswers', async (ctx) => {
+    await listLikingAnswers(ctx)
+})
+
+router.put('/likingAnswers/:id', auth, checkAnswerExist, async (ctx, next) => {
+    await likeAnswer(ctx, next)
+}, undislikeAnswers)
+
+router.delete('/likingAnswers/:id', auth, checkAnswerExist, async (ctx) => {
+    await unlikeAnswers(ctx)
+})
+
+router.get('/:id/dislikingAnswers', async (ctx) => {
+    await listDislikingAnswers(ctx)
+})
+
+router.put('/dislikingAnswers/:id', auth, checkAnswerExist, async (ctx, next) => {
+    await dislikeAnswer(ctx, next)
+}, unlikeAnswers)
+
+router.delete('/dislikingAnswers/:id', auth, checkAnswerExist, async (ctx) => {
+    await undislikeAnswers(ctx)
+})
 
 module.exports = router
